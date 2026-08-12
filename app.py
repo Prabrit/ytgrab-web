@@ -7,6 +7,7 @@ import yt_dlp
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "ytgrab-secret-key-change-in-prod")
 
+# Strictly enforcing local document usage for file outputs
 DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -43,15 +44,15 @@ def run_download_job(job_id, url, mode, fmt):
         'no_warnings': True,
         'nocheckcertificate': True,
         'progress_hooks': [lambda d: update_progress(d, job_id)],
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['mweb', 'android', 'ios', 'web']
-            }
-        },
+        # extractor_args forcing mobile clients has been removed
+        # YouTube requires PO Tokens for mobile APIs, causing the format error.
     }
 
+    # Bypasses the "Page needs to be reloaded" Render/Datacenter IP block
     if os.path.exists(cookie_path):
         ydl_opts['cookiefile'] = cookie_path
+    else:
+        print("WARNING: cookies.txt not found. YouTube may block Render's IP.")
 
     if is_audio:
         ydl_opts.update({
@@ -64,7 +65,6 @@ def run_download_job(job_id, url, mode, fmt):
         })
     else:
         ydl_opts.update({
-            # Uses flexible matching for video+audio or pre-merged single streams
             'format': 'bv*+ba/b',
             'merge_output_format': 'mp4',
         })
