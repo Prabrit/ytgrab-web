@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 5000
-
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+# We use the shell form (sh -c) so the container can evaluate Render's dynamic $PORT variable.
+# If $PORT is missing (like on your local machine), it defaults to 5000.
+CMD sh -c "gunicorn --bind 0.0.0.0:${PORT:-5000} app:app"
