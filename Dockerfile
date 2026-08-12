@@ -1,20 +1,22 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# ffmpeg is a system binary, not a Python package — Render's native Python
+# runtime doesn't include it, so we install it at the OS level here.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# We use the shell form (sh -c) so the container can evaluate Render's dynamic $PORT variable.
-# If $PORT is missing (like on your local machine), it defaults to 5000.
-CMD sh -c "gunicorn --bind 0.0.0.0:${PORT:-5000} app:app"
+# Render sets $PORT at runtime; default to 10000 for local `docker run` testing.
+ENV PORT=10000
+EXPOSE 10000
+
+# Single worker: job status is stored in memory (see app.py), so multiple
+# worker processes would each have their own copy and disagree.
+CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT:-10000} app:app"]
