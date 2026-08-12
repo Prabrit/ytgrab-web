@@ -10,11 +10,9 @@ app.secret_key = os.environ.get("SECRET_KEY", "ytgrab-secret-key-change-in-prod"
 DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# In-memory store for background download jobs
 JOBS = {}
 
 def update_progress(d, job_id):
-    """Callback hook for yt-dlp download progress."""
     if job_id not in JOBS:
         return
     
@@ -24,7 +22,6 @@ def update_progress(d, job_id):
         if total > 0:
             JOBS[job_id]['progress'] = round((downloaded / total) * 100, 1)
         else:
-            # Fallback parsing string percentage
             p_str = d.get('_percent_str', '0%').strip().replace('%', '')
             try:
                 JOBS[job_id]['progress'] = float(p_str)
@@ -36,7 +33,6 @@ def update_progress(d, job_id):
 
 
 def run_download_job(job_id, url, mode, fmt):
-    """Executes the download in a background thread."""
     JOBS[job_id]['status'] = 'downloading'
     is_audio = (mode == "music")
     cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
@@ -47,10 +43,9 @@ def run_download_job(job_id, url, mode, fmt):
         'no_warnings': True,
         'nocheckcertificate': True,
         'progress_hooks': [lambda d: update_progress(d, job_id)],
-        # Bypasses YouTube's "The page needs to be reloaded" bot detection:
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios']
+                'player_client': ['mweb', 'android', 'ios', 'web']
             }
         },
     }
@@ -60,7 +55,7 @@ def run_download_job(job_id, url, mode, fmt):
 
     if is_audio:
         ydl_opts.update({
-            'format': 'bestaudio/best',
+            'format': 'ba/b',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': fmt if fmt in ['mp3', 'm4a', 'wav'] else 'mp3',
@@ -69,9 +64,8 @@ def run_download_job(job_id, url, mode, fmt):
         })
     else:
         ydl_opts.update({
-            # Fallback gracefully to any best video + audio streams
-            'format': 'bestvideo+bestaudio/best',
-            # Force ffmpeg to merge them into a standard playable MP4 file
+            # Uses flexible matching for video+audio or pre-merged single streams
+            'format': 'bv*+ba/b',
             'merge_output_format': 'mp4',
         })
 
@@ -80,7 +74,6 @@ def run_download_job(job_id, url, mode, fmt):
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
-            # Ensure the filename recorded in JOBS matches the converted output file
             base, _ = os.path.splitext(filename)
             if is_audio:
                 filename = f"{base}.{fmt}"
@@ -97,7 +90,6 @@ def run_download_job(job_id, url, mode, fmt):
         JOBS[job_id]['error'] = str(e)
 
 
-# Page Routes
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -115,7 +107,6 @@ def logout():
     return redirect(url_for("login"))
 
 
-# API Routes required by static/app.js
 @app.route("/api/jobs", methods=["GET", "POST"])
 def api_jobs():
     if request.method == "POST":
@@ -140,14 +131,12 @@ def api_jobs():
             "error": None
         }
 
-        # Start download in background thread
         thread = threading.Thread(target=run_download_job, args=(job_id, url, mode, fmt))
         thread.daemon = True
         thread.start()
 
         return jsonify(JOBS[job_id]), 201
 
-    # GET request returns all current jobs
     return jsonify(list(JOBS.values()))
 
 @app.route("/api/jobs/<job_id>", methods=["GET", "DELETE"])
