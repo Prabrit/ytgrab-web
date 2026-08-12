@@ -3,5 +3,4 @@ downloads/*
 runtime/
 __pycache__/
 *.pyc
-.git/
 .env

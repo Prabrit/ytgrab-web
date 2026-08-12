@@ -120,10 +120,13 @@ session so its requests look like a browser instead:
 4. **Don't commit that file to git.** On Render: go to your service →
    Environment → Secret Files → Add Secret File → name it `cookies.txt` →
    paste in the file's contents → Save. Render redeploys automatically and
-   the file lands at `/etc/secrets/cookies.txt`, which `app.py` already
-   checks for and uses automatically if present.
+   the file lands at `/etc/secrets/cookies.txt`. `app.py` copies it into a
+   writable `runtime/cookies.txt` at startup and uses that copy — Render
+   mounts Secret Files **read-only**, and yt-dlp needs to write rotated
+   cookies back to the file it reads from, so pointing it at the read-only
+   original directly fails with `Read-only file system`.
 5. Running locally instead? Set `YTGRAB_COOKIES_FILE=/path/to/cookies.txt`
-   before starting the app.
+   before starting the app — it'll get copied the same way.
 
 Cookies can go stale after a few weeks — if the bot-detection error comes
 back later, re-export a fresh `cookies.txt` and update the Secret File.

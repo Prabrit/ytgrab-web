@@ -40,7 +40,18 @@ MAX_CONCURRENT_DOWNLOADS = 3
 # since YouTube blocks datacenter IPs with a "Sign in to confirm you're not
 # a bot" error otherwise. On Render this is a Secret File, which lands at
 # /etc/secrets/<filename> at runtime — see README.md for setup.
-COOKIES_FILE = os.environ.get("YTGRAB_COOKIES_FILE", "/etc/secrets/cookies.txt")
+#
+# yt-dlp writes rotated cookies *back* to this file after each use, but
+# Render's Secret Files are mounted read-only — so we copy the source into
+# a writable runtime path once at startup and point yt-dlp at the copy
+# instead of the read-only original.
+_COOKIES_SOURCE = os.environ.get("YTGRAB_COOKIES_FILE", "/etc/secrets/cookies.txt")
+RUNTIME_DIR = BASE_DIR / "runtime"
+RUNTIME_DIR.mkdir(exist_ok=True)
+COOKIES_FILE = None
+if os.path.exists(_COOKIES_SOURCE):
+    COOKIES_FILE = str(RUNTIME_DIR / "cookies.txt")
+    shutil.copyfile(_COOKIES_SOURCE, COOKIES_FILE)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("YTGRAB_SECRET_KEY", uuid.uuid4().hex)
@@ -58,8 +69,8 @@ if not shutil.which("ffmpeg"):
 if not ACCESS_PASSWORD:
     print("Warning: YTGRAB_PASSWORD is not set — the site has no login. "
           "Set it before exposing this beyond localhost.")
-if not os.path.exists(COOKIES_FILE):
-    print(f"Note: no cookies file at {COOKIES_FILE} — downloads may fail with "
+if not COOKIES_FILE:
+    print(f"Note: no cookies file found at {_COOKIES_SOURCE} — downloads may fail with "
           f"YouTube's bot-detection error on cloud hosts. See README.md.")
 
 
@@ -168,7 +179,7 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             opts["format"] = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
         opts["merge_output_format"] = "mp4"
 
-    if os.path.exists(COOKIES_FILE):
+    if COOKIES_FILE:
         opts["cookiefile"] = COOKIES_FILE
 
     try:
