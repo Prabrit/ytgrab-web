@@ -71,6 +71,15 @@
       statusEl.remove();
     } else if (job.status === 'error') {
       statusEl.textContent = 'failed';
+      if (job.error && !li.querySelector('.err-text')) {
+        const err = document.createElement('span');
+        err.className = 'err-text';
+        err.title = job.error;
+        err.textContent = job.error.length > 90
+          ? job.error.slice(0, 90) + '…'
+          : job.error;
+        li.appendChild(err);
+      }
     }
   }
 
@@ -141,8 +150,12 @@
       const job = await res.json();
 
       counterPercent.textContent = `${job.percent.toFixed(1)}%`;
-      counterMeta.textContent = [job.speed, job.eta ? `ETA ${job.eta}` : '']
-        .filter(Boolean).join('  ·  ');
+      if (job.status === 'error') {
+        counterMeta.textContent = job.error || 'Unknown error';
+      } else {
+        counterMeta.textContent = [job.speed, job.eta ? `ETA ${job.eta}` : '']
+          .filter(Boolean).join('  ·  ');
+      }
       setStatus(job.status, job.status === 'done' ? 'done'
                  : job.status === 'error' ? 'error' : 'downloading');
 

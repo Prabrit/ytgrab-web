@@ -298,7 +298,8 @@ button, input, select {
 .history-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -331,6 +332,14 @@ button, input, select {
   text-decoration: none;
 }
 .history-item a.dl-link:hover { background: var(--amber-dim); }
+
+.history-item .err-text {
+  flex-basis: 100%;
+  color: var(--error);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+}
 
 /* ---------- Login page ---------- */
 

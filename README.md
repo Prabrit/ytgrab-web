@@ -100,6 +100,34 @@ nixPkgs = ['ffmpeg']
 so Railway's builder installs ffmpeg (or reuse the same `Dockerfile`,
 which Railway also supports).
 
+## "Sign in to confirm you're not a bot"
+
+If downloads fail with this error, it's YouTube blocking requests from
+your host's server IP, not a bug — very common on Render, Railway, and
+similar platforms, since they use shared IP ranges YouTube treats as
+automated traffic. The fix is to give yt-dlp cookies from a real logged-in
+session so its requests look like a browser instead:
+
+1. **Use a secondary Google account for this**, not your main one — yt-dlp's
+   own docs note that automated use like this risks the account getting
+   flagged or temporarily locked.
+2. Log into YouTube with that account in a **private/incognito window**
+   (regular tabs rotate cookies frequently, which breaks this).
+3. Install the **"Get cookies.txt LOCALLY"** browser extension (check
+   you've got that exact one — an older extension with a similar name was
+   pulled from the Chrome Web Store over data-exfiltration concerns), and
+   export a `cookies.txt` file from youtube.com.
+4. **Don't commit that file to git.** On Render: go to your service →
+   Environment → Secret Files → Add Secret File → name it `cookies.txt` →
+   paste in the file's contents → Save. Render redeploys automatically and
+   the file lands at `/etc/secrets/cookies.txt`, which `app.py` already
+   checks for and uses automatically if present.
+5. Running locally instead? Set `YTGRAB_COOKIES_FILE=/path/to/cookies.txt`
+   before starting the app.
+
+Cookies can go stale after a few weeks — if the bot-detection error comes
+back later, re-export a fresh `cookies.txt` and update the Secret File.
+
 ## How it works
 
 - `POST /api/jobs` queues a download on a background thread pool (up to 3

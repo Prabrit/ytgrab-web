@@ -35,12 +35,32 @@ ACCESS_PASSWORD = os.environ.get("YTGRAB_PASSWORD")           # None = no login 
 JOB_MAX_AGE_SECONDS = 2 * 60 * 60                              # clean up after 2 hours
 MAX_CONCURRENT_DOWNLOADS = 3
 
+# Optional: path to a Netscape-format cookies file, used to authenticate
+# yt-dlp's requests as a real browser session. Needed on most cloud hosts,
+# since YouTube blocks datacenter IPs with a "Sign in to confirm you're not
+# a bot" error otherwise. On Render this is a Secret File, which lands at
+# /etc/secrets/<filename> at runtime — see README.md for setup.
+COOKIES_FILE = os.environ.get("YTGRAB_COOKIES_FILE", "/etc/secrets/cookies.txt")
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("YTGRAB_SECRET_KEY", uuid.uuid4().hex)
 
 executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+# These run on import, so they show up in logs whether the app is started
+# with `python app.py` (dev) or `gunicorn ... app:app` (production/Render) —
+# a check tucked inside `if __name__ == "__main__"` only fires for the
+# former and silently never runs under gunicorn.
+if not shutil.which("ffmpeg"):
+    print("Warning: ffmpeg not found on PATH — audio extraction and merging will fail.")
+if not ACCESS_PASSWORD:
+    print("Warning: YTGRAB_PASSWORD is not set — the site has no login. "
+          "Set it before exposing this beyond localhost.")
+if not os.path.exists(COOKIES_FILE):
+    print(f"Note: no cookies file at {COOKIES_FILE} — downloads may fail with "
+          f"YouTube's bot-detection error on cloud hosts. See README.md.")
 
 
 # --------------------------------------------------------------------------
@@ -148,6 +168,9 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             opts["format"] = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
         opts["merge_output_format"] = "mp4"
 
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
+
     try:
         update_job(job_id, status="downloading")
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -238,9 +261,4 @@ def job_file(job_id):
 
 
 if __name__ == "__main__":
-    if not shutil.which("ffmpeg"):
-        print("Warning: ffmpeg not found on PATH — audio extraction and merging will fail.")
-    if not ACCESS_PASSWORD:
-        print("Warning: YTGRAB_PASSWORD is not set — the site has no login. "
-              "Set it before exposing this beyond localhost.")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), threaded=True)
