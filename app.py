@@ -1,6 +1,6 @@
 import os
-import sys
-import logging
+import uuid
+import threading
 from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for, session
 import yt_dlp
 
@@ -10,17 +10,44 @@ app.secret_key = os.environ.get("SECRET_KEY", "ytgrab-secret-key-change-in-prod"
 DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Helper function to get ytdl options
-def get_ydl_opts(download_format="mp3", is_audio_only=True):
-    # Path to cookies.txt if uploaded/present
-    cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+# In-memory store for background download jobs
+JOBS = {}
+
+def update_progress(d, job_id):
+    """Callback hook for yt-dlp download progress."""
+    if job_id not in JOBS:
+        return
     
-    opts = {
+    if d.get('status') == 'downloading':
+        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+        downloaded = d.get('downloaded_bytes', 0)
+        if total > 0:
+            JOBS[job_id]['progress'] = round((downloaded / total) * 100, 1)
+        else:
+            # Fallback parsing string percentage
+            p_str = d.get('_percent_str', '0%').strip().replace('%', '')
+            try:
+                JOBS[job_id]['progress'] = float(p_str)
+            except ValueError:
+                pass
+    elif d.get('status') == 'finished':
+        JOBS[job_id]['progress'] = 100.0
+        JOBS[job_id]['status'] = 'processing'
+
+
+def run_download_job(job_id, url, mode, fmt):
+    """Executes the download in a background thread."""
+    JOBS[job_id]['status'] = 'downloading'
+    is_audio = (mode == "music")
+    cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+
+    ydl_opts = {
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        # Bypasses YouTube's "The page needs to be reloaded" bot error:
+        'progress_hooks': [lambda d: update_progress(d, job_id)],
+        # Bypasses YouTube's "The page needs to be reloaded" bot detection:
         'extractor_args': {
             'youtube': {
                 'player_client': ['mweb', 'ios', 'android', 'web_safari']
@@ -29,24 +56,42 @@ def get_ydl_opts(download_format="mp3", is_audio_only=True):
     }
 
     if os.path.exists(cookie_path):
-        opts['cookiefile'] = cookie_path
+        ydl_opts['cookiefile'] = cookie_path
 
-    if is_audio_only:
-        opts.update({
+    if is_audio:
+        ydl_opts.update({
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': download_format if download_format in ['mp3', 'm4a', 'wav'] else 'mp3',
+                'preferredcodec': fmt if fmt in ['mp3', 'm4a', 'wav'] else 'mp3',
                 'preferredquality': '192',
             }],
         })
     else:
-        opts.update({
+        ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         })
 
-    return opts
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
 
+            if is_audio:
+                base, _ = os.path.splitext(filename)
+                filename = f"{base}.{fmt}"
+
+            JOBS[job_id]['title'] = info.get("title", "Unknown Title")
+            JOBS[job_id]['filename'] = os.path.basename(filename)
+            JOBS[job_id]['status'] = 'completed'
+            JOBS[job_id]['progress'] = 100.0
+
+    except Exception as e:
+        JOBS[job_id]['status'] = 'failed'
+        JOBS[job_id]['error'] = str(e)
+
+
+# Page Routes
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -63,47 +108,55 @@ def logout():
     session.pop("user", None)
     return redirect(url_for("login"))
 
-@app.route("/download", methods=["POST"])
-def download():
-    data = request.get_json() or {}
-    url = data.get("url")
-    mode = data.get("mode", "music")  # 'music' or 'video'
-    fmt = data.get("format", "mp3")
 
-    if not url:
-        return jsonify({"status": "error", "message": "No URL provided"}), 400
+# API Routes required by static/app.js
+@app.route("/api/jobs", methods=["GET", "POST"])
+def api_jobs():
+    if request.method == "POST":
+        data = request.get_json() or {}
+        url = data.get("url")
+        mode = data.get("mode", "music")
+        fmt = data.get("format", "mp3")
 
-    is_audio = (mode == "music")
-    opts = get_ydl_opts(download_format=fmt, is_audio_only=is_audio)
+        if not url:
+            return jsonify({"error": "No URL provided"}), 400
 
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            # Adjust extension for audio post-processing
-            if is_audio:
-                base, _ = os.path.splitext(filename)
-                filename = f"{base}.{fmt}"
+        job_id = str(uuid.uuid4())
+        JOBS[job_id] = {
+            "id": job_id,
+            "url": url,
+            "mode": mode,
+            "format": fmt,
+            "status": "pending",
+            "progress": 0.0,
+            "title": "Fetching metadata...",
+            "filename": None,
+            "error": None
+        }
 
-            download_filename = os.path.basename(filename)
+        # Start download in background thread
+        thread = threading.Thread(target=run_download_job, args=(job_id, url, mode, fmt))
+        thread.daemon = True
+        thread.start()
 
-        return jsonify({
-            "status": "success",
-            "title": info.get("title", "Unknown Title"),
-            "file": download_filename,
-            "id": info.get("id")
-        })
+        return jsonify(JOBS[job_id]), 201
 
-    except Exception as e:
-        error_msg = str(e)
-        return jsonify({
-            "status": "error",
-            "message": error_msg
-        }), 500
+    # GET request returns all current jobs
+    return jsonify(list(JOBS.values()))
 
-@app.route("/files/<path:filename>")
-def get_file(filename):
+@app.route("/api/jobs/<job_id>", methods=["GET", "DELETE"])
+def api_job_detail(job_id):
+    if job_id not in JOBS:
+        return jsonify({"error": "Job not found"}), 404
+
+    if request.method == "DELETE":
+        del JOBS[job_id]
+        return jsonify({"success": True})
+
+    return jsonify(JOBS[job_id])
+
+@app.route("/downloads/<path:filename>")
+def download_file(filename):
     return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
 
 if __name__ == "__main__":
