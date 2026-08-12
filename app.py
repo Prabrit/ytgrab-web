@@ -50,7 +50,7 @@ def run_download_job(job_id, url, mode, fmt):
         # Bypasses YouTube's "The page needs to be reloaded" bot detection:
         'extractor_args': {
             'youtube': {
-                'player_client': ['mweb', 'ios', 'android', 'web_safari']
+                'player_client': ['android', 'ios']
             }
         },
     }
@@ -69,7 +69,10 @@ def run_download_job(job_id, url, mode, fmt):
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            # Fallback gracefully to any best video + audio streams
+            'format': 'bestvideo+bestaudio/best',
+            # Force ffmpeg to merge them into a standard playable MP4 file
+            'merge_output_format': 'mp4',
         })
 
     try:
@@ -77,9 +80,12 @@ def run_download_job(job_id, url, mode, fmt):
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
+            # Ensure the filename recorded in JOBS matches the converted output file
+            base, _ = os.path.splitext(filename)
             if is_audio:
-                base, _ = os.path.splitext(filename)
                 filename = f"{base}.{fmt}"
+            else:
+                filename = f"{base}.mp4"
 
             JOBS[job_id]['title'] = info.get("title", "Unknown Title")
             JOBS[job_id]['filename'] = os.path.basename(filename)
