@@ -1,22 +1,28 @@
-FROM python:3.12-slim
+FROM python:3.10-slim
 
-# ffmpeg is a system binary, not a Python package — Render's native Python
-# runtime doesn't include it, so we install it at the OS level here.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+# Prevent Python from writing pyc files and enable real-time log printing
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Install system dependencies:
+# - git: needed to install the latest yt-dlp build from GitHub
+# - ffmpeg: needed by yt-dlp for audio/video extraction and conversion
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application files
 COPY . .
 
-# Render sets $PORT at runtime; default to 10000 for local `docker run` testing.
-ENV PORT=10000
-EXPOSE 10000
+# Expose port 5000 for local testing
+EXPOSE 5000
 
-# Single worker: job status is stored in memory (see app.py), so multiple
-# worker processes would each have their own copy and disagree.
-CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT:-10000} app:app"]
+# Start the application with Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
