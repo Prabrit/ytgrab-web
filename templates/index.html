@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ytgrab</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="deck-wrap">
+    <header class="topline">
+      <span class="wordmark">ytgrab</span>
+      <span class="tag">self-hosted &middot; v1</span>
+      {% if has_password %}<a class="logout" href="{{ url_for('logout') }}">log out</a>{% endif %}
+    </header>
+
+    <section class="deck" aria-label="downloader">
+      <div class="reel" id="reelLeft"><div class="hub"></div></div>
+
+      <div class="slot-area">
+        <input
+          id="urlInput"
+          class="slot-input"
+          type="text"
+          placeholder="Paste a YouTube link…"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <div class="mode-row">
+          <div class="mode-toggle" role="group" aria-label="download mode">
+            <button type="button" class="mode-btn active" data-mode="audio">Music</button>
+            <button type="button" class="mode-btn" data-mode="video">Video</button>
+          </div>
+
+          <select id="audioFormat" class="fmt-select">
+            <option value="mp3">mp3</option>
+            <option value="m4a">m4a</option>
+            <option value="flac">flac</option>
+            <option value="opus">opus</option>
+          </select>
+
+          <select id="videoQuality" class="fmt-select hidden">
+            <option value="best">best</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+            <option value="480p">480p</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="reel" id="reelRight"><div class="hub"></div></div>
+    </section>
+
+    <button id="pullBtn" class="pull-btn">
+      <span class="pull-icon">&#9654;</span> Pull track
+    </button>
+
+    <section class="counter" id="counter">
+      <span class="counter-time" id="counterPercent">00.0%</span>
+      <span class="counter-status" id="counterStatus">IDLE</span>
+      <span class="counter-meta" id="counterMeta"></span>
+    </section>
+
+    <section class="history" aria-label="recent downloads">
+      <h2 class="history-title">Recent pulls</h2>
+      <ul id="historyList" class="history-list">
+        <li class="history-empty">Nothing yet — paste a link above to start.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
