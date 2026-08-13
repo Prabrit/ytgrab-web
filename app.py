@@ -171,6 +171,16 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         "sleep_interval_requests": 1,  # small pause between internal requests -
                                         # rapid-fire requests are one of the
                                         # things that gets an IP flagged faster
+        # YouTube is currently experimenting with forcing "SABR" streaming on
+        # some player clients (web_safari in particular), which requires a
+        # Proof-of-Origin token yt-dlp can't generate on its own — without
+        # one, YouTube strips out every real video/audio format and only
+        # thumbnail images are left, causing "Requested format is not
+        # available" even with a fully open selector. Explicitly trying
+        # android alongside the default web client currently sidesteps this
+        # for most videos. Which clients are affected shifts over time, so
+        # this may need revisiting later.
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
 
     if audio_only:

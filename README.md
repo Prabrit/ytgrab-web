@@ -180,6 +180,28 @@ When you re-export, two things matter for how long the cookies last:
   file, that's usually the export itself going wrong (e.g. JSON saved
   with a `.txt` extension) rather than anything on the app side.
 
+## "Requested format is not available"
+
+This one's unrelated to cookies. YouTube has been experimenting with
+forcing "SABR" streaming on some player clients — when it does, and yt-dlp
+doesn't have a valid Proof-of-Origin (PO) token, YouTube strips out every
+real video/audio format and leaves only thumbnail images. At that point
+even a fully open format selector has nothing to select, so it fails.
+
+`app.py` already tells yt-dlp to also try the `android` player client
+alongside the default `web` one, which currently sidesteps this for most
+videos (which specific clients are affected shifts over time — this may
+need adjusting again later).
+
+If you still hit this after redeploying, the fuller fix is running a
+dedicated PO-token provider (e.g.
+[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider))
+as a second background process alongside the app, so yt-dlp can generate
+valid tokens on demand. That's a real addition — another service, another
+dependency, more moving parts to keep working — worth doing if this keeps
+happening, but not something to bolt on speculatively before confirming
+the lighter fix isn't enough.
+
 ## How it works
 
 - `POST /api/jobs` queues a download on a background thread pool (up to 3
