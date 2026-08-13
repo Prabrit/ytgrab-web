@@ -185,7 +185,12 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             opts["format"] = "bestvideo+bestaudio/best"
         else:
             height = quality.rstrip("pP")
-            opts["format"] = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+            # Trailing /best (no height cap) means: if this video simply
+            # doesn't have anything at or under the requested resolution,
+            # fall back to whatever's available instead of failing outright.
+            opts["format"] = (
+                f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+            )
         opts["merge_output_format"] = "mp4"
 
     if COOKIES_FILE:
