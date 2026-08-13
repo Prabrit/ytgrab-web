@@ -16,6 +16,14 @@ You need **ffmpeg** on the machine running the server:
 - macOS: `brew install ffmpeg`
 - Linux: `sudo apt install ffmpeg`
 
+You also need a **JS runtime** (Node.js or Deno) for YouTube downloads to
+work reliably — see "YouTube errors" below for why. Easiest locally:
+- Windows/macOS: install [Node.js](https://nodejs.org)
+- Linux: `sudo apt install nodejs`
+
+(The Docker image used for the Render deploy already includes this —
+nothing extra to do there.)
+
 ## Run it
 
 ```bash
@@ -100,13 +108,33 @@ nixPkgs = ['ffmpeg']
 so Railway's builder installs ffmpeg (or reuse the same `Dockerfile`,
 which Railway also supports).
 
-## "Sign in to confirm you're not a bot"
+## YouTube errors: "Sign in to confirm you're not a bot" / "The page needs to be reloaded"
 
-If downloads fail with this error, it's YouTube blocking requests from
-your host's server IP, not a bug — very common on Render, Railway, and
-similar platforms, since they use shared IP ranges YouTube treats as
-automated traffic. The fix is to give yt-dlp cookies from a real logged-in
-session so its requests look like a browser instead:
+Both of these come from the same underlying cause: since November 2025,
+yt-dlp needs an external JavaScript runtime (Node.js or Deno) installed
+alongside it to solve YouTube's anti-bot JS challenges. Without one, these
+errors show up **regardless of cookies** — a JS runtime is the actual fix,
+not an optional extra.
+
+**This repo's `Dockerfile` already installs Node.js**, so a fresh deploy on
+Render has this covered. If you still see these errors after redeploying:
+
+1. Check Render's Logs tab right after a restart (look for lines starting
+   `Starting gunicorn`). If you see `Warning: no JS runtime (node/deno)
+   found on PATH`, the image didn't pick up the Node.js install — trigger
+   **Manual Deploy → Clear build cache & deploy** on Render so it rebuilds
+   from scratch instead of reusing a cached layer from before this was
+   added.
+2. If that warning isn't there, Node.js is working and yt-dlp is genuinely
+   using it — in which case what you're hitting is YouTube occasionally
+   still challenging the request. `app.py` already retries each download
+   once automatically before giving up, since this class of failure is
+   often intermittent.
+
+**Cookies help too, but as a second layer, not the primary fix.** YouTube
+also treats requests from shared cloud IP ranges (Render, Railway, etc.)
+with more suspicion than a home IP, even with a working JS runtime. If
+errors persist after confirming Node.js is active:
 
 1. **Use a secondary Google account for this**, not your main one — yt-dlp's
    own docs note that automated use like this risks the account getting
@@ -128,13 +156,20 @@ session so its requests look like a browser instead:
 5. Running locally instead? Set `YTGRAB_COOKIES_FILE=/path/to/cookies.txt`
    before starting the app — it'll get copied the same way.
 
-Cookies can go stale after a few weeks — if the bot-detection error comes
-back later, re-export a fresh `cookies.txt` and update the Secret File.
+Cookies can go stale after a few weeks — if bot-detection errors come back
+later, re-export a fresh `cookies.txt` and update the Secret File. Keeping
+`yt-dlp[default]` unpinned to an old version (see `requirements.txt`) also
+matters — YouTube and yt-dlp are in an ongoing back-and-forth, and point
+releases regularly fix breakage like this.
 
 ## How it works
 
 - `POST /api/jobs` queues a download on a background thread pool (up to 3
   at once) so one person's download doesn't block another's.
+- Each download is retried once automatically on failure (with a few
+  seconds' pause) before being marked as errored — YouTube's anti-bot
+  checks are sometimes intermittent, and a retry alone resolves some of
+  them.
 - The browser polls `GET /api/jobs/<id>` once a second for progress and
   swaps in a download link when the job finishes.
 - Finished files and their job records are deleted automatically after 2

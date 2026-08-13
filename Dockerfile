@@ -1,9 +1,13 @@
 FROM python:3.12-slim
 
-# ffmpeg is a system binary, not a Python package — Render's native Python
-# runtime doesn't include it, so we install it at the OS level here.
+# ffmpeg: audio/video merging and extraction (system binary, not a Python
+# package — Render's native Python runtime doesn't include it).
+# nodejs: yt-dlp has required an external JS runtime to solve YouTube's
+# anti-bot "JS Challenge" system since yt-dlp 2025.11.12 — without one,
+# downloads fail with errors like "Sign in to confirm you're not a bot" or
+# "The page needs to be reloaded" even with valid cookies.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

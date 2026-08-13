@@ -60,6 +60,8 @@ executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
+JS_RUNTIME = "node" if shutil.which("node") else ("deno" if shutil.which("deno") else None)
+
 # These run on import, so they show up in logs whether the app is started
 # with `python app.py` (dev) or `gunicorn ... app:app` (production/Render) —
 # a check tucked inside `if __name__ == "__main__"` only fires for the
@@ -72,6 +74,10 @@ if not ACCESS_PASSWORD:
 if not COOKIES_FILE:
     print(f"Note: no cookies file found at {_COOKIES_SOURCE} — downloads may fail with "
           f"YouTube's bot-detection error on cloud hosts. See README.md.")
+if not JS_RUNTIME:
+    print("Warning: no JS runtime (node/deno) found on PATH — YouTube downloads will "
+          "likely fail with 'Sign in to confirm you're not a bot' or "
+          "'The page needs to be reloaded', regardless of cookies. See README.md.")
 
 
 # --------------------------------------------------------------------------
@@ -182,26 +188,35 @@ def run_job(job_id, url, audio_only, audio_format, quality):
     if COOKIES_FILE:
         opts["cookiefile"] = COOKIES_FILE
 
-    try:
-        update_job(job_id, status="downloading")
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            base = DOWNLOAD_DIR / job_id
-            ext = audio_format if audio_only else "mp4"
-            filename = f"{job_id}.{ext}"
-            if not (DOWNLOAD_DIR / filename).exists():
-                # Fall back to whatever yt-dlp actually produced
-                matches = list(DOWNLOAD_DIR.glob(f"{job_id}.*"))
-                if matches:
-                    filename = matches[0].name
-            update_job(
-                job_id,
-                status="done",
-                title=info.get("title", "download"),
-                filename=filename,
-            )
-    except Exception as exc:
-        update_job(job_id, status="error", error=str(exc))
+    if JS_RUNTIME:
+        opts["js_runtimes"] = {JS_RUNTIME: {}}
+
+    last_exc = None
+    for attempt in range(2):
+        try:
+            update_job(job_id, status="downloading" if attempt == 0 else "retrying")
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                ext = audio_format if audio_only else "mp4"
+                filename = f"{job_id}.{ext}"
+                if not (DOWNLOAD_DIR / filename).exists():
+                    # Fall back to whatever yt-dlp actually produced
+                    matches = list(DOWNLOAD_DIR.glob(f"{job_id}.*"))
+                    if matches:
+                        filename = matches[0].name
+                update_job(
+                    job_id,
+                    status="done",
+                    title=info.get("title", "download"),
+                    filename=filename,
+                )
+                return
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 0:
+                time.sleep(3)  # short pause before the one retry
+
+    update_job(job_id, status="error", error=str(last_exc))
 
 
 def cleanup_loop():
