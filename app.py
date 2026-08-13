@@ -168,6 +168,9 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         "ignoreerrors": False,
         "quiet": True,
         "no_warnings": True,
+        "sleep_interval_requests": 1,  # small pause between internal requests -
+                                        # rapid-fire requests are one of the
+                                        # things that gets an IP flagged faster
     }
 
     if audio_only:

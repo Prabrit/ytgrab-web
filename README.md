@@ -162,6 +162,24 @@ later, re-export a fresh `cookies.txt` and update the Secret File. Keeping
 matters — YouTube and yt-dlp are in an ongoing back-and-forth, and point
 releases regularly fix breakage like this.
 
+**Worth knowing going in:** cookies going stale isn't a one-time bug to fix
+— it's an ongoing characteristic of running this on a cloud host. YouTube
+invalidates session cookies faster when it sees them used repeatedly from
+a datacenter IP than it would from a home connection, so expect to
+re-export every so often (anywhere from weeks to, on a heavily-used
+instance, days) rather than treating any single fix here as permanent.
+`app.py` adds a small delay between requests to reduce how often this gets
+triggered, but it doesn't eliminate the need for fresh cookies periodically.
+
+When you re-export, two things matter for how long the cookies last:
+- Export from a **private/incognito window you then just close** —
+  never click "Log out" in that browser afterward, since logging out
+  invalidates the session server-side and kills every cookie exported
+  from it, immediately.
+- If yt-dlp complains the file doesn't look like a Netscape-format cookies
+  file, that's usually the export itself going wrong (e.g. JSON saved
+  with a `.txt` extension) rather than anything on the app side.
+
 ## How it works
 
 - `POST /api/jobs` queues a download on a background thread pool (up to 3
