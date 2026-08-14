@@ -62,6 +62,27 @@ JOBS_LOCK = threading.Lock()
 
 JS_RUNTIME = "node" if shutil.which("node") else ("deno" if shutil.which("deno") else None)
 
+# PO token provider (see start.sh / Dockerfile) — a local HTTP server that
+# gives yt-dlp Proof-of-Origin tokens, which YouTube increasingly requires
+# before returning real (non-placeholder) formats. A few retries here
+# because start.sh launches it just before this module gets imported, so
+# it may need a moment to come up.
+POT_PROVIDER_URL = "http://127.0.0.1:4416"
+
+
+def _pot_provider_reachable():
+    import urllib.request
+    for _ in range(5):
+        try:
+            urllib.request.urlopen(f"{POT_PROVIDER_URL}/ping", timeout=1)
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+POT_PROVIDER_UP = _pot_provider_reachable()
+
 # These run on import, so they show up in logs whether the app is started
 # with `python app.py` (dev) or `gunicorn ... app:app` (production/Render) —
 # a check tucked inside `if __name__ == "__main__"` only fires for the
@@ -78,6 +99,10 @@ if not JS_RUNTIME:
     print("Warning: no JS runtime (node/deno) found on PATH — YouTube downloads will "
           "likely fail with 'Sign in to confirm you're not a bot' or "
           "'The page needs to be reloaded', regardless of cookies. See README.md.")
+if not POT_PROVIDER_UP:
+    print(f"Note: PO token provider not reachable at {POT_PROVIDER_URL} — downloads "
+          f"may fail with 'Requested format is not available' on some videos. "
+          f"See README.md.")
 
 
 # --------------------------------------------------------------------------
@@ -180,7 +205,10 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         # android alongside the default web client currently sidesteps this
         # for most videos. Which clients are affected shifts over time, so
         # this may need revisiting later.
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        "extractor_args": {
+            "youtube": {"player_client": ["android", "web"]},
+            "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
+        },
     }
 
     if audio_only:

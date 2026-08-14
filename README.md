@@ -189,18 +189,22 @@ real video/audio format and leaves only thumbnail images. At that point
 even a fully open format selector has nothing to select, so it fails.
 
 `app.py` already tells yt-dlp to also try the `android` player client
-alongside the default `web` one, which currently sidesteps this for most
-videos (which specific clients are affected shifts over time — this may
-need adjusting again later).
+alongside the default `web` one, and this repo now also runs a local PO
+token provider ([bgutil-ytdlp-pot-provider-rs](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs))
+so yt-dlp can generate valid tokens on demand instead of going without.
+`start.sh` launches it as a background process on `127.0.0.1:4416`
+alongside gunicorn — nothing extra to configure, it's part of the Docker
+image now. If Render's Logs tab shows `Note: PO token provider not
+reachable` right after startup, something about that process didn't come
+up; a **Manual Deploy → Clear build cache & deploy** is the first thing to
+try.
 
-If you still hit this after redeploying, the fuller fix is running a
-dedicated PO-token provider (e.g.
-[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider))
-as a second background process alongside the app, so yt-dlp can generate
-valid tokens on demand. That's a real addition — another service, another
-dependency, more moving parts to keep working — worth doing if this keeps
-happening, but not something to bolt on speculatively before confirming
-the lighter fix isn't enough.
+Which player clients are affected by SABR-forcing, and how reliable PO
+token generation is, both shift over time as YouTube and the yt-dlp
+community adjust — if format errors come back after all of this, it's
+worth checking whether a newer version of the provider exists (bump the
+download URLs in `Dockerfile` to a pinned version if `/latest` ever
+regresses) rather than assuming the setup itself is wrong.
 
 ## How it works
 
