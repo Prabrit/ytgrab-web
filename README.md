@@ -222,6 +222,32 @@ worth checking whether a newer version of the provider exists (bump the
 download URLs in `Dockerfile` to a pinned version if `/latest` ever
 regresses) rather than assuming the setup itself is wrong.
 
+**If you still get this error after redeploying:** the app error message
+now tells you which of two situations you're in, instead of just repeating
+yt-dlp's generic error:
+
+- *"couldn't confirm the PO token plugin loaded at all"* — the plugin
+  never got picked up by yt-dlp in the first place (a packaging/path
+  problem, not a token problem). The Docker build now has a smoke test
+  for exactly this (`RUN python3 -c "import
+  yt_dlp_plugins.extractor.getpot_bgutil_http"`) — if a build ever
+  succeeds without that step, something about the plugin zip's layout
+  changed upstream and the extraction command in `Dockerfile` needs
+  updating to match.
+- *"yt-dlp reports no working PO token provider"* — the plugin loaded,
+  but couldn't reach `bgutil-pot server` on `127.0.0.1:4416` at request
+  time. Check Render's Logs tab for whether that process is still running.
+- *"the PO token plugin IS loaded and reporting in"* — tokens are being
+  generated and accepted by the plugin machinery, but YouTube is still
+  refusing the request. At that point it's IP reputation (Render/Railway's
+  shared ranges get flagged more than a home IP), not a config bug — the
+  cookies steps above are the next thing to try, or waiting/retrying.
+
+Either way, the full `yt-dlp -v` output for the failed job (not just the
+one-line summary shown in the app) gets printed to the server logs right
+when the job fails — check Render's Logs tab for
+`[job <id>] yt-dlp -v output follows:` for the complete picture.
+
 ## How it works
 
 - `POST /api/jobs` queues a download on a background thread pool (up to 3

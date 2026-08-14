@@ -33,6 +33,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Build-time smoke test: fail loudly here if the PO token plugin extracted
+# above isn't actually where yt-dlp will look for it, rather than silently
+# shipping an image where every YouTube download fails with "Requested
+# format is not available" and no clue why. This mirrors the check the
+# plugin's own README recommends running with `yt-dlp -v`, just done once
+# at build time instead of on every request.
+RUN python3 -c "import yt_dlp_plugins.extractor.getpot_bgutil_http" && \
+    echo "PO token plugin import: OK"
+
 COPY . .
 RUN chmod +x start.sh
 

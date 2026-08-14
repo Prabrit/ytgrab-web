@@ -184,8 +184,34 @@ def make_progress_hook(job_id):
     return hook
 
 
+class _CaptureLogger:
+    """Swallows yt-dlp's verbose/debug output instead of printing it, so we
+    can surface the useful parts — in particular the
+    '[debug] [youtube] [pot] PO Token Providers: ...' line — only when a
+    job actually fails. That one line is the difference between "the PO
+    token plugin never loaded" and "it loaded fine, something else is
+    wrong", which otherwise you'd only find by re-running yt-dlp by hand
+    with -v. See https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs#verification
+    """
+    def __init__(self):
+        self.lines = []
+
+    def debug(self, msg):
+        self.lines.append(msg)
+
+    def info(self, msg):
+        self.lines.append(msg)
+
+    def warning(self, msg):
+        self.lines.append(f"WARNING: {msg}")
+
+    def error(self, msg):
+        self.lines.append(f"ERROR: {msg}")
+
+
 def build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot=False):
     outtmpl = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
+    logger = _CaptureLogger()
 
     # YouTube is currently forcing "SABR" streaming on some player clients
     # (web in particular), which requires a Proof-of-Origin token yt-dlp
@@ -213,6 +239,9 @@ def build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot=False):
         "ignoreerrors": False,
         "quiet": True,
         "no_warnings": True,
+        "verbose": True,       # captured by `logger` below, not printed —
+        "logger": logger,      # this is what lets us see the PO Token
+                                # Providers line when something goes wrong.
         "sleep_interval_requests": 1,  # small pause between internal requests -
                                         # rapid-fire requests are one of the
                                         # things that gets an IP flagged faster
@@ -248,11 +277,12 @@ def build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot=False):
     if JS_RUNTIME:
         opts["js_runtimes"] = {JS_RUNTIME: {}}
 
-    return opts
+    return opts, logger
 
 
 def run_job(job_id, url, audio_only, audio_format, quality):
     last_exc = None
+    last_logger = None
     for attempt in range(2):
         # If the first attempt failed specifically with "format not
         # available", the PO token from the provider is most likely being
@@ -261,7 +291,8 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         legacy_pot = attempt == 1 and last_exc is not None and (
             "Requested format is not available" in str(last_exc)
         )
-        opts = build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot)
+        opts, logger = build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot)
+        last_logger = logger
         try:
             update_job(job_id, status="downloading" if attempt == 0 else "retrying")
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -285,17 +316,45 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             if attempt == 0:
                 time.sleep(3)  # short pause before the one retry
 
+    # Pull the one line out of the verbose log that actually answers "is
+    # the PO token plugin working" — everything else in there is noise for
+    # this purpose. Printed to stdout (so it lands in Render's Logs tab)
+    # only now, on failure — successful jobs never dump this.
+    pot_line = None
+    for line in (last_logger.lines if last_logger else []):
+        if "PO Token Providers" in line:
+            pot_line = line.strip()
+            break
+
+    print(f"[job {job_id}] failed: {last_exc}")
+    if last_logger and last_logger.lines:
+        print(f"[job {job_id}] yt-dlp -v output follows:")
+        print("\n".join(last_logger.lines))
+
     error_msg = str(last_exc)
     if "Requested format is not available" in error_msg:
-        # Point at the actual cause instead of leaving people staring at
-        # yt-dlp's generic message — see README.md's "Requested format is
-        # not available" section for the full explanation.
-        error_msg += (
-            " — this almost always means the PO token provider isn't "
-            "supplying a valid token for this video. Check the server "
-            "logs for a 'PO token provider not reachable' warning at "
-            "startup, and see README.md."
-        )
+        if pot_line is None:
+            error_msg += (
+                " — couldn't confirm the PO token plugin loaded at all "
+                "(no 'PO Token Providers' line in yt-dlp's own debug "
+                "output — check server logs for the full dump just "
+                "printed). If it's missing entirely, the plugin most "
+                "likely isn't being found on PYTHONPATH. See README.md."
+            )
+        elif "bgutil" not in pot_line.lower() or pot_line.rstrip().endswith(": none"):
+            error_msg += (
+                f" — yt-dlp reports no working PO token provider ({pot_line}). "
+                "The plugin didn't load or the local bgutil-pot server isn't "
+                "reachable. See README.md."
+            )
+        else:
+            error_msg += (
+                f" — the PO token plugin IS loaded and reporting in "
+                f"({pot_line}), so tokens are being generated but YouTube "
+                "is still rejecting this request — usually a flagged "
+                "server IP rather than a config problem at this point. "
+                "See README.md."
+            )
     update_job(job_id, status="error", error=error_msg)
 
 
