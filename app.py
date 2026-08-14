@@ -184,8 +184,28 @@ def make_progress_hook(job_id):
     return hook
 
 
-def run_job(job_id, url, audio_only, audio_format, quality):
+def build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot=False):
     outtmpl = str(DOWNLOAD_DIR / f"{job_id}.%(ext)s")
+
+    # YouTube is currently forcing "SABR" streaming on some player clients
+    # (web in particular), which requires a Proof-of-Origin token yt-dlp
+    # can't generate on its own — without one, YouTube strips out every
+    # real video/audio format and only thumbnail images are left, causing
+    # "Requested format is not available" even with a fully open selector.
+    #
+    # Rather than pinning a hand-picked client list (which breaks whenever
+    # YouTube changes which clients are SABR-gated — as happened here:
+    # "android" + "web" stopped being enough), we use yt-dlp's own
+    # actively-maintained "default" client set and add "mweb" alongside
+    # it, since that's the client yt-dlp's own PO Token Guide recommends
+    # pairing with a PO token provider for GVS requests:
+    # https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+    bgutil_args = {"base_url": [POT_PROVIDER_URL]}
+    if legacy_pot:
+        # Documented fallback when tokens from the provider stop being
+        # accepted: https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs
+        bgutil_args["disable_innertube"] = ["1"]
+
     opts = {
         "outtmpl": outtmpl,
         "progress_hooks": [make_progress_hook(job_id)],
@@ -196,18 +216,9 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         "sleep_interval_requests": 1,  # small pause between internal requests -
                                         # rapid-fire requests are one of the
                                         # things that gets an IP flagged faster
-        # YouTube is currently experimenting with forcing "SABR" streaming on
-        # some player clients (web_safari in particular), which requires a
-        # Proof-of-Origin token yt-dlp can't generate on its own — without
-        # one, YouTube strips out every real video/audio format and only
-        # thumbnail images are left, causing "Requested format is not
-        # available" even with a fully open selector. Explicitly trying
-        # android alongside the default web client currently sidesteps this
-        # for most videos. Which clients are affected shifts over time, so
-        # this may need revisiting later.
         "extractor_args": {
-            "youtube": {"player_client": ["android", "web"]},
-            "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
+            "youtube": {"player_client": ["default", "mweb"]},
+            "youtubepot-bgutilhttp": bgutil_args,
         },
     }
 
@@ -237,8 +248,20 @@ def run_job(job_id, url, audio_only, audio_format, quality):
     if JS_RUNTIME:
         opts["js_runtimes"] = {JS_RUNTIME: {}}
 
+    return opts
+
+
+def run_job(job_id, url, audio_only, audio_format, quality):
     last_exc = None
     for attempt in range(2):
+        # If the first attempt failed specifically with "format not
+        # available", the PO token from the provider is most likely being
+        # rejected — retry once in the provider's documented legacy mode
+        # instead of just repeating the exact same request.
+        legacy_pot = attempt == 1 and last_exc is not None and (
+            "Requested format is not available" in str(last_exc)
+        )
+        opts = build_ydl_opts(job_id, audio_only, audio_format, quality, legacy_pot)
         try:
             update_job(job_id, status="downloading" if attempt == 0 else "retrying")
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -262,7 +285,18 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             if attempt == 0:
                 time.sleep(3)  # short pause before the one retry
 
-    update_job(job_id, status="error", error=str(last_exc))
+    error_msg = str(last_exc)
+    if "Requested format is not available" in error_msg:
+        # Point at the actual cause instead of leaving people staring at
+        # yt-dlp's generic message — see README.md's "Requested format is
+        # not available" section for the full explanation.
+        error_msg += (
+            " — this almost always means the PO token provider isn't "
+            "supplying a valid token for this video. Check the server "
+            "logs for a 'PO token provider not reachable' warning at "
+            "startup, and see README.md."
+        )
+    update_job(job_id, status="error", error=error_msg)
 
 
 def cleanup_loop():
