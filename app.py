@@ -316,29 +316,69 @@ def run_job(job_id, url, audio_only, audio_format, quality):
             if attempt == 0:
                 time.sleep(3)  # short pause before the one retry
 
-    # Pull the one line out of the verbose log that actually answers "is
-    # the PO token plugin working" — everything else in there is noise for
-    # this purpose. Printed to stdout (so it lands in Render's Logs tab)
-    # only now, on failure — successful jobs never dump this.
-    pot_line = None
+    # Pull out the handful of lines from the verbose log that actually
+    # explain a format failure — everything else in there is noise for
+    # this purpose. Two independent systems can each cause "Requested
+    # format is not available" on their own: the PO token provider (its
+    # status alone doesn't prove tokens are being *accepted*) and the
+    # separate signature/n-challenge JS solver — a working PO token
+    # provider says nothing about whether that solver is also working.
+    # Printed to stdout (so it lands in Render's Logs tab) only on
+    # failure — successful jobs never dump this.
+    KEY_MARKERS = (
+        "PO Token Providers",
+        "SABR",
+        "challenge solving failed",
+        "Signature solving failed",
+        "nsig extraction failed",
+        "No supported JavaScript runtime",
+        "skipped as they are missing a url",
+        "skipped as they are missing a URL",
+    )
+    key_lines = []
     for line in (last_logger.lines if last_logger else []):
-        if "PO Token Providers" in line:
-            pot_line = line.strip()
-            break
+        if any(marker in line for marker in KEY_MARKERS) and line.strip() not in key_lines:
+            key_lines.append(line.strip())
 
     print(f"[job {job_id}] failed: {last_exc}")
     if last_logger and last_logger.lines:
         print(f"[job {job_id}] yt-dlp -v output follows:")
         print("\n".join(last_logger.lines))
 
+    pot_line = next((l for l in key_lines if "PO Token Providers" in l), None)
+    js_challenge_failed = any(
+        ("challenge solving failed" in l) or ("nsig extraction failed" in l)
+        for l in key_lines
+    )
+    no_js_runtime = any("No supported JavaScript runtime" in l for l in key_lines)
+
     error_msg = str(last_exc)
     if "Requested format is not available" in error_msg:
-        if pot_line is None:
+        if no_js_runtime:
+            error_msg += (
+                " — yt-dlp reports no usable JavaScript runtime at request "
+                "time, even though this should be configured. That points "
+                "at the js_runtimes setting not taking effect, or "
+                f"node not actually being on PATH inside the container "
+                "(JS_RUNTIME was "
+                f"{'detected as ' + repr(JS_RUNTIME) if JS_RUNTIME else 'NOT detected'} "
+                "at startup)."
+            )
+        elif js_challenge_failed:
+            error_msg += (
+                " — the signature/n-challenge JS solver failed "
+                "independently of the PO token provider (both can break "
+                "formats on their own). This is usually YouTube having "
+                "changed the player JS faster than the installed "
+                "yt-dlp/yt-dlp-ejs version accounts for — try redeploying "
+                "with 'Clear build cache & deploy' to pick up the latest "
+                "yt-dlp[default], which bundles current EJS scripts."
+            )
+        elif pot_line is None:
             error_msg += (
                 " — couldn't confirm the PO token plugin loaded at all "
                 "(no 'PO Token Providers' line in yt-dlp's own debug "
-                "output — check server logs for the full dump just "
-                "printed). If it's missing entirely, the plugin most "
+                "output). If it's missing entirely, the plugin most "
                 "likely isn't being found on PYTHONPATH. See README.md."
             )
         elif "bgutil" not in pot_line.lower() or pot_line.rstrip().endswith(": none"):
@@ -350,11 +390,16 @@ def run_job(job_id, url, audio_only, audio_format, quality):
         else:
             error_msg += (
                 f" — the PO token plugin IS loaded and reporting in "
-                f"({pot_line}), so tokens are being generated but YouTube "
-                "is still rejecting this request — usually a flagged "
-                "server IP rather than a config problem at this point. "
+                f"({pot_line}), and no separate JS-challenge failure showed "
+                "up either, so tokens are being generated but YouTube is "
+                "still rejecting this request — usually a flagged server "
+                "IP rather than a config problem at this point. "
                 "See README.md."
             )
+
+    if key_lines:
+        error_msg += "\n\nRelevant yt-dlp debug lines:\n" + "\n".join(f"  {l}" for l in key_lines)
+
     update_job(job_id, status="error", error=error_msg)
 
 
