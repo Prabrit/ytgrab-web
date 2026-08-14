@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ensure start script is executable
-RUN chmod +x start.sh
+
 
 EXPOSE 10000
-CMD ["./start.sh"]
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "app:app"]
