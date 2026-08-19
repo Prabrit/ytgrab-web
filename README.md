@@ -188,23 +188,27 @@ doesn't have a valid Proof-of-Origin (PO) token, YouTube strips out every
 real video/audio format and leaves only thumbnail images. At that point
 even a fully open format selector has nothing to select, so it fails.
 
-`app.py` already tells yt-dlp to also try the `android` player client
-alongside the default `web` one, and this repo now also runs a local PO
-token provider ([bgutil-ytdlp-pot-provider-rs](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs))
-so yt-dlp can generate valid tokens on demand instead of going without.
-`start.sh` launches it as a background process on `127.0.0.1:4416`
-alongside gunicorn — nothing extra to configure, it's part of the Docker
-image now. If Render's Logs tab shows `Note: PO token provider not
-reachable` right after startup, something about that process didn't come
-up; a **Manual Deploy → Clear build cache & deploy** is the first thing to
-try.
+`app.py` currently uses the `tv` and `mweb` player clients, per yt-dlp's own
+current PO Token Guide (github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide):
+`tv` needs no PO token at all (only cookies, to avoid DRM'd-only formats —
+which this app already provides), and `mweb` is their officially
+recommended client to pair with a PO token provider for GVS requests. This
+repo also runs a local PO token provider
+([bgutil-ytdlp-pot-provider-rs](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs))
+so `mweb` can actually get a token instead of going without. `start.sh`
+launches it as a background process on `127.0.0.1:4416` alongside
+gunicorn — nothing extra to configure, it's part of the Docker image now.
+If Render's Logs tab shows `Note: PO token provider not reachable` right
+after startup, something about that process didn't come up; a **Manual
+Deploy → Clear build cache & deploy** is the first thing to try.
 
-Which player clients are affected by SABR-forcing, and how reliable PO
-token generation is, both shift over time as YouTube and the yt-dlp
-community adjust — if format errors come back after all of this, it's
-worth checking whether a newer version of the provider exists (bump the
-download URLs in `Dockerfile` to a pinned version if `/latest` ever
-regresses) rather than assuming the setup itself is wrong.
+If format errors come back, check the on-page diagnostic trail on the
+failed job first (added in this version — see "Debugging a failed
+download" below) before assuming the client list needs changing again.
+That table in yt-dlp's wiki is the actual source of truth here and is
+worth re-checking directly, since which clients need what shifts as
+YouTube and yt-dlp adjust — this app pointing at `tv`/`mweb` reflects
+today's table, not a permanent fact.
 
 ## How it works
 
@@ -222,6 +226,21 @@ regresses) rather than assuming the setup itself is wrong.
 - Job state lives in memory — restarting the server clears in-progress
   jobs. That's a deliberate simplicity trade-off for a small personal tool;
   swap in Redis or a database if you need it to survive restarts.
+
+## Debugging a failed download
+
+yt-dlp runs in verbose mode internally, captured by a logger instead of
+printed directly. On failure:
+- The full trace prints to stdout, so it's in Render's **Logs tab** —
+  search for `yt-dlp trace for failed job`.
+- The lines mentioning PO tokens, format selection, or client names get
+  pulled out and shown **directly on the page**, under the failed job in
+  Recent Pulls — no log-diving needed for the common cases.
+
+Reading that trail beats guessing: it shows which client(s) were tried,
+whether a PO token was requested and for what, and what YouTube actually
+said no to. Changing `player_client` or the PO token setup without reading
+it first just means trading one guess for another.
 
 ## Before you share this with others
 
