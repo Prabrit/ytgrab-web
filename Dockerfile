@@ -1,11 +1,32 @@
 FROM python:3.12-slim
 
-# Install Node.js (for JS challenge solving) and FFmpeg (for media merging)
+# ffmpeg: audio/video merging and extraction (system binary, not a Python
+# package — Render's native Python runtime doesn't include it).
+# nodejs: yt-dlp has required an external JS runtime to solve YouTube's
+# anti-bot "JS Challenge" system since yt-dlp 2025.11.12 — without one,
+# downloads fail with errors like "Sign in to confirm you're not a bot" or
+# "The page needs to be reloaded" even with valid cookies.
+# wget: used below to fetch the PO token provider (not present in the slim
+# base image).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    nodejs \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends ffmpeg nodejs wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# PO token provider: YouTube is increasingly requiring a Proof-of-Origin
+# token before it'll return real (non-placeholder) video/audio formats —
+# without one, downloads fail with "Requested format is not available"
+# even though extraction otherwise succeeds. This runs as a small local
+# HTTP server (127.0.0.1:4416) that yt-dlp queries for tokens; see
+# start.sh for how it's launched alongside gunicorn, and README.md for
+# background. Binary + matching yt-dlp plugin come from the same release
+# so their versions always line up.
+RUN wget -q https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-pot-linux-x86_64 \
+        -O /usr/local/bin/bgutil-pot && \
+    chmod +x /usr/local/bin/bgutil-pot && \
+    wget -q https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-ytdlp-pot-provider-rs.zip \
+        -O /tmp/pot-plugin.zip && \
+    python3 -c "import zipfile, site; zipfile.ZipFile('/tmp/pot-plugin.zip').extractall(site.getsitepackages()[0])" && \
+    rm /tmp/pot-plugin.zip
 
 WORKDIR /app
 
@@ -13,9 +34,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN chmod +x start.sh
 
-# Ensure start script is executable
+# Render sets $PORT at runtime; default to 10000 for local `docker run` testing.
+ENV PORT=10000
+EXPOSE 10000
 
-
-
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "app:app"]
+# start.sh launches the PO token provider in the background, then execs
+# gunicorn in the foreground. Single gunicorn worker: job status is stored
+# in memory (see app.py), so multiple worker processes would each have
+# their own copy and disagree.
+CMD ["./start.sh"]

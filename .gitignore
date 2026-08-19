@@ -1,6 +1,6 @@
+downloads/*
+!downloads/.gitkeep
+runtime/
 __pycache__/
 *.pyc
 .env
-.venv/
-venv/
-*.zip

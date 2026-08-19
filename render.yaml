@@ -1,9 +1,10 @@
 services:
   - type: web
     name: ytgrab-web
-    env: docker
-    region: oregon
+    runtime: docker
     plan: free
     envVars:
-      - key: PORT
-        value: 10000
+      - key: YTGRAB_PASSWORD
+        sync: false          # you'll be prompted to enter this when creating the Blueprint
+      - key: YTGRAB_SECRET_KEY
+        generateValue: true  # Render generates a random secret for you

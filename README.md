@@ -188,32 +188,16 @@ doesn't have a valid Proof-of-Origin (PO) token, YouTube strips out every
 real video/audio format and leaves only thumbnail images. At that point
 even a fully open format selector has nothing to select, so it fails.
 
-`app.py` tells yt-dlp to use its own actively-maintained `default` client
-set (currently `tv,ios,web`, or `tv,web` when cookies are set) plus
-`mweb`, since yt-dlp's own [PO Token Guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide)
-specifically recommends pairing `mweb` with a PO token provider for GVS
-requests. An earlier version of this app hard-pinned `player_client` to
-just `android` + `web`, which is exactly the kind of thing that breaks
-silently: YouTube later tightened things further so `web` alone needed a
-token `android` couldn't substitute for, and the pinned list excluded
-`tv`/`ios`/`mweb`, which is what actually triggered the
-"Requested format is not available" error. Letting yt-dlp pick its own
-default set (instead of a hand-picked list) means this keeps working as
-YouTube's client requirements shift, since that default is what yt-dlp's
-maintainers actively update.
-
-This repo also runs a local PO token provider
-([bgutil-ytdlp-pot-provider-rs](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs))
+`app.py` already tells yt-dlp to also try the `android` player client
+alongside the default `web` one, and this repo now also runs a local PO
+token provider ([bgutil-ytdlp-pot-provider-rs](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs))
 so yt-dlp can generate valid tokens on demand instead of going without.
 `start.sh` launches it as a background process on `127.0.0.1:4416`
 alongside gunicorn — nothing extra to configure, it's part of the Docker
 image now. If Render's Logs tab shows `Note: PO token provider not
 reachable` right after startup, something about that process didn't come
 up; a **Manual Deploy → Clear build cache & deploy** is the first thing to
-try. If the provider *is* reachable but tokens still get rejected for a
-particular video, `app.py` now automatically retries once in the
-provider's documented "legacy" mode (`disable_innertube=1`), which is the
-plugin's own recommended fallback when tokens stop working.
+try.
 
 Which player clients are affected by SABR-forcing, and how reliable PO
 token generation is, both shift over time as YouTube and the yt-dlp
@@ -221,32 +205,6 @@ community adjust — if format errors come back after all of this, it's
 worth checking whether a newer version of the provider exists (bump the
 download URLs in `Dockerfile` to a pinned version if `/latest` ever
 regresses) rather than assuming the setup itself is wrong.
-
-**If you still get this error after redeploying:** the app error message
-now tells you which of two situations you're in, instead of just repeating
-yt-dlp's generic error:
-
-- *"couldn't confirm the PO token plugin loaded at all"* — the plugin
-  never got picked up by yt-dlp in the first place (a packaging/path
-  problem, not a token problem). The Docker build now has a smoke test
-  for exactly this (`RUN python3 -c "import
-  yt_dlp_plugins.extractor.getpot_bgutil_http"`) — if a build ever
-  succeeds without that step, something about the plugin zip's layout
-  changed upstream and the extraction command in `Dockerfile` needs
-  updating to match.
-- *"yt-dlp reports no working PO token provider"* — the plugin loaded,
-  but couldn't reach `bgutil-pot server` on `127.0.0.1:4416` at request
-  time. Check Render's Logs tab for whether that process is still running.
-- *"the PO token plugin IS loaded and reporting in"* — tokens are being
-  generated and accepted by the plugin machinery, but YouTube is still
-  refusing the request. At that point it's IP reputation (Render/Railway's
-  shared ranges get flagged more than a home IP), not a config bug — the
-  cookies steps above are the next thing to try, or waiting/retrying.
-
-Either way, the full `yt-dlp -v` output for the failed job (not just the
-one-line summary shown in the app) gets printed to the server logs right
-when the job fails — check Render's Logs tab for
-`[job <id>] yt-dlp -v output follows:` for the complete picture.
 
 ## How it works
 
